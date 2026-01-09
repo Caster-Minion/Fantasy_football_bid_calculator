@@ -185,6 +185,11 @@ df_completo = df_completo.dropna(subset=['Voto'])
 
 
 
+
+
+
+
+
 ########################################################################
 # CREAZIONE DEL GRAFO DEI RUOLI MANTRA E CORRELAZIONI DELLE PERFORMORMANCE
 ########################################################################
@@ -428,6 +433,9 @@ for idx, row in df_marcatori.iterrows():
                 if r_clean in ruoli_mantra:  # Usiamo la lista ruoli definita prima
                     ruoli_best_teammate.append(r_clean)
 
+
+
+
 # --- VISUALIZZAZIONE RISULTATI ---
 
 from collections import Counter
@@ -644,4 +652,180 @@ plt.xlabel('Media ASSIST a partita')
 plt.ylabel('Media GOAL a partita')
 plt.grid(True, linestyle='--', alpha=0.3)
 
+plt.show()
+
+print("\n--- ANALISI 7: GOAL E ASSIST PER RUOLO DIVISI PER TIER ---")
+
+# --- 1. DEFINIZIONE DEI TIER ---
+tiers_dict = {
+    'Top': ['Inter', 'Juventus', 'Milan', 'Napoli', 'Roma', 'Atalanta'],
+    'Medie': ['Torino', 'Bologna', 'Sassuolo', 'Udinese', 'Sampdoria', 'Genoa', 'Lazio', 'Verona', 'Fiorentina',
+              'Como'],
+    'Piccole': ['Empoli', 'Cagliari', 'Salernitana', 'Lecce', 'Spezia', 'Venezia', 'Cremonese',
+                'Frosinone', 'Benevento', 'SPAL', 'Crotone', 'Parma', 'Brescia', 'Pescara', 'Carpi', 'Chievo', 'Monza']
+}
+
+# Invertiamo il dizionario per mappare: Squadra -> Tier
+squadra_to_tier = {}
+for tier, squadre in tiers_dict.items():
+    for sq in squadre:
+        squadra_to_tier[sq] = tier
+
+# --- 2. PREPARAZIONE DATI ---
+# Copiamo il dataframe completo
+df_tier = df_completo[['Squadra', 'Rm', 'Gf', 'Ass']].dropna().copy()
+
+# Mappiamo il Tier
+df_tier['Fascia'] = df_tier['Squadra'].map(squadra_to_tier)
+
+# Rimuoviamo squadre che non sono nel dizionario (opzionale, per evitare errori su squadre mancanti)
+df_tier = df_tier.dropna(subset=['Fascia'])
+
+# Gestione multiruolo (Esplosione)
+df_tier['Rm_Singolo'] = df_tier['Rm'].astype(str).str.split(';')
+df_tier = df_tier.explode('Rm_Singolo')
+df_tier['Rm_Singolo'] = df_tier['Rm_Singolo'].str.strip()
+
+# Ordine tattico per il grafico
+ordine_ruoli = ['Por', 'Dd', 'Ds', 'Dc', 'E', 'M', 'C', 'W', 'T', 'A', 'Pc']
+df_tier = df_tier[df_tier['Rm_Singolo'].isin(ordine_ruoli)]
+
+# --- 3. AGGREGAZIONE ---
+# Calcoliamo la media per Fascia e Ruolo
+stats_tier = df_tier.groupby(['Fascia', 'Rm_Singolo'])[['Gf', 'Ass']].mean().reset_index()
+
+# Ristrutturiamo per il grafico (Melt)
+df_plot_tier = stats_tier.melt(
+    id_vars=['Fascia', 'Rm_Singolo'],
+    value_vars=['Gf', 'Ass'],
+    var_name='Tipo_Bonus',
+    value_name='Media_Partita'
+)
+
+print("Esempio dati elaborati per Fascia:")
+print(stats_tier.head())
+
+# --- 4. VISUALIZZAZIONE (3 SUBPLOTS) ---
+
+# Creiamo una figura con 3 righe (una per tier)
+fig, axes = plt.subplots(3, 1, figsize=(14, 18), sharey=True)
+fig.suptitle('Performance Medie (Goal vs Assist) per Ruolo e Fascia Squadra', fontsize=16)
+
+# Lista ordinata delle fasce per il loop
+fasce_order = ['Top', 'Medie', 'Piccole']
+
+for i, fascia in enumerate(fasce_order):
+    ax = axes[i]
+
+    # Filtriamo i dati per la fascia corrente
+    data_subset = df_plot_tier[df_plot_tier['Fascia'] == fascia]
+
+    # Creiamo il barplot
+    sns.barplot(
+        data=data_subset,
+        x='Rm_Singolo',
+        y='Media_Partita',
+        hue='Tipo_Bonus',
+        palette={'Gf': '#d62728', 'Ass': '#1f77b4'},  # Rosso Goal, Blu Assist
+        order=ordine_ruoli,  # Mantiene l'ordine tattico (Difesa -> Attacco)
+        ax=ax
+    )
+
+    # Personalizzazione Grafica
+    ax.set_title(f'Fascia: {fascia.upper()}', fontsize=14, fontweight='bold', color='black')
+    ax.set_xlabel('')
+    ax.set_ylabel('Media per Partita')
+    ax.grid(axis='y', linestyle='--', alpha=0.3)
+    ax.legend(loc='upper left', title='Bonus')
+
+    # Aggiungiamo i valori sopra le barre
+    for container in ax.containers:
+        ax.bar_label(container, fmt='%.3f', padding=3, fontsize=9)
+
+# Aggiustiamo l'etichetta dell'asse X solo sull'ultimo grafico in basso
+axes[2].set_xlabel('Ruolo Mantra', fontsize=12)
+
+plt.tight_layout(rect=[0, 0.03, 1, 0.97])  # Lascia spazio per il titolo principale
+plt.show()
+
+
+
+
+
+
+
+
+
+print("\n--- ANALISI 8: COMBINAZIONI RUOLI (RAW) DIVISE PER TIER ---")
+
+
+# --- 2. PREPARAZIONE DATI ---
+# Usiamo i ruoli 'grezzi' (Rm) senza esploderli
+df_combo_tier = df_completo[['Squadra', 'Rm', 'Gf', 'Ass']].dropna().copy()
+df_combo_tier = df_combo_tier[df_combo_tier['Rm'] != '']  # Rimuoviamo vuoti
+
+# Mappiamo la Fascia
+df_combo_tier['Fascia'] = df_combo_tier['Squadra'].map(squadra_to_tier)
+df_combo_tier = df_combo_tier.dropna(subset=['Fascia'])
+
+# Parametro: Minimo presenze per apparire nel grafico (per evitare outlier statistici)
+min_presenze = 20
+
+# --- 3. VISUALIZZAZIONE ---
+fig, axes = plt.subplots(3, 1, figsize=(16, 20), sharey=True)  # Sharey permette confronto diretto altezze
+fig.suptitle(f'Performance Combinazioni Ruoli per Fascia (Min. {min_presenze} presenze)', fontsize=16)
+
+fasce_order = ['Top', 'Medie', 'Piccole']
+
+for i, fascia in enumerate(fasce_order):
+    ax = axes[i]
+
+    # Filtriamo per fascia
+    subset = df_combo_tier[df_combo_tier['Fascia'] == fascia]
+
+    # Aggreghiamo i dati
+    stats = subset.groupby('Rm').agg(
+        Media_Goal=('Gf', 'mean'),
+        Media_Assist=('Ass', 'mean'),
+        Presenze=('Gf', 'count')
+    ).reset_index()
+
+    # FILTRO: Teniamo solo combinazioni con abbastanza dati
+    stats = stats[stats['Presenze'] >= min_presenze]
+
+    # ORDINAMENTO: Ordiniamo per "Pericolosità" (Goal*3 + Assist) decrescente
+    stats['Score'] = (stats['Media_Goal'] * 3) + stats['Media_Assist']
+    stats = stats.sort_values(by='Score', ascending=False)
+
+    # Prepariamo per il grafico (Melt)
+    df_plot = stats.melt(id_vars='Rm', value_vars=['Media_Goal', 'Media_Assist'],
+                         var_name='Tipo_Bonus', value_name='Media_Partita')
+
+    # Plot
+    sns.barplot(
+        data=df_plot,
+        x='Rm',
+        y='Media_Partita',
+        hue='Tipo_Bonus',
+        palette={'Media_Goal': '#d62728', 'Media_Assist': '#1f77b4'},
+        ax=ax
+    )
+
+    # Styling
+    ax.set_title(f'Fascia: {fascia.upper()}', fontsize=14, fontweight='bold', color='black')
+    ax.set_xlabel('')
+    ax.set_ylabel('Media Punti Bonus')
+    ax.grid(axis='y', linestyle='--', alpha=0.3)
+    ax.legend(loc='upper right', title='Bonus')
+
+    # Rotazione etichette asse X per leggibilità
+    ax.tick_params(axis='x', rotation=45)
+
+    # Etichette valori sulle barre
+    for container in ax.containers:
+        ax.bar_label(container, fmt='%.2f', padding=3, fontsize=8, rotation=90)
+
+# Aggiustamenti finali
+axes[2].set_xlabel('Combinazione Ruolo Mantra', fontsize=12)
+plt.tight_layout(rect=[0, 0.02, 1, 0.98])
 plt.show()
